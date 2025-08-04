@@ -1,4 +1,4 @@
-package api.spring;
+package api.idempotent.spring;
 
 
 import lombok.Data;

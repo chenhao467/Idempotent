@@ -1,4 +1,4 @@
-package api;
+package api.idempotent;
 
 
 import com.fasterxml.jackson.core.type.TypeReference;

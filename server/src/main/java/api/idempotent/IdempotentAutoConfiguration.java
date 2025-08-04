@@ -1,9 +1,9 @@
-package api;
+package api.idempotent;
 
 
 
-import api.spring.IdempotentProperties;
-import api.spring.aspect.IdempotentAspect;
+import api.idempotent.spring.IdempotentProperties;
+import api.idempotent.spring.aspect.IdempotentAspect;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.AutoConfigureAfter;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;

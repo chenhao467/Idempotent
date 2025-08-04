@@ -1,8 +1,8 @@
-package api.spring.cache;
+package api.idempotent.spring.cache;
 
-import api.annotation.Idempotent;
-import api.spring.IdempotentProperties;
-import api.spring.exception.IdempotentException;
+import api.idempotent.annotation.Idempotent;
+import api.idempotent.spring.IdempotentProperties;
+import api.idempotent.spring.exception.IdempotentException;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 import org.reflections.Reflections;

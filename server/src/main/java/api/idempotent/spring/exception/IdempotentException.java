@@ -1,4 +1,4 @@
-package api.spring.exception;
+package api.idempotent.spring.exception;
 
 
 public class IdempotentException extends RuntimeException {

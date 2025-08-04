@@ -1,7 +1,7 @@
-package api.spring.cache;
+package api.idempotent.spring.cache;
 
 
-import api.annotation.Idempotent;
+import api.idempotent.annotation.Idempotent;
 import lombok.Data;
 
 import java.lang.reflect.Method;

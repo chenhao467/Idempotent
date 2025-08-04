@@ -1,4 +1,4 @@
-package api.assign;
+package api.idempotent.assign;
 
 import java.nio.charset.StandardCharsets;
 import java.security.KeyFactory;

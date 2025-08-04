@@ -1,4 +1,4 @@
-package api.annotation;
+package api.idempotent.annotation;
 
 import java.lang.annotation.*;
 import java.util.concurrent.TimeUnit;
