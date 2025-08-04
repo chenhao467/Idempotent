@@ -34,6 +34,7 @@ import org.springframework.web.util.ContentCachingRequestWrapper;
 
 import java.io.BufferedReader;
 import java.io.IOException;
+import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -50,26 +51,26 @@ import java.util.stream.Collectors;
  * @date 2025/07/17
  */
 @Aspect
-@Component
+@Component("EnglishIdempotentAspect")
 public class IdempotentAspect {
 
-    private static final Logger log = LoggerFactory.getLogger(IdempotentAspect.class);
-    private static final String KEY_PREFIX = "idempotent:";
-    private final SpelExpressionParser parser = new SpelExpressionParser();
-    private final DefaultParameterNameDiscoverer nameDiscoverer = new DefaultParameterNameDiscoverer();
+	private static final Logger log = LoggerFactory.getLogger(IdempotentAspect.class);
+	private static final String KEY_PREFIX = "idempotent:";
+	private final SpelExpressionParser parser = new SpelExpressionParser();
+	private final DefaultParameterNameDiscoverer nameDiscoverer = new DefaultParameterNameDiscoverer();
 	@Resource
 	private IdempotentMethodCache methodCache;
-    @Resource
-    private RedisTemplate redisTemplate;
+	@Resource
+	private RedisTemplate redisTemplate;
 
-    @Resource
-    private IdempotentProperties idempotentProperties;
+	@Resource
+	private IdempotentProperties idempotentProperties;
 
 	@Resource
 	private RedisDelayedDeleteService redisDelayedDeleteService;
 
-    @Around("@annotation(idempotent)")
-    public Object around(ProceedingJoinPoint joinPoint, Idempotent idempotent) throws Throwable {
+	@Around("@annotation(idempotent)")
+	public Object around(ProceedingJoinPoint joinPoint, Idempotent idempotent) throws Throwable {
 		//判断是否需要验签
 		if(idempotent.enableSignVerify()){
 			verifySign();
@@ -101,13 +102,15 @@ public class IdempotentAspect {
 		if (Boolean.FALSE.equals(isAbsent)) {
 			log.warn("重复请求触发幂等拦截, key: {}", redisKey);
 			throw new IdempotentException(cachedAnno.info());
-		}else{
-			redisTemplate.opsForValue().set(redisKey, "", cachedAnno.expireTime(), cachedAnno.timeUnit());
 		}
-
 		try {
-			// 执行业务方法
-			Object result = joinPoint.proceed();
+			Method method = meta.getMethod();
+			Object target = joinPoint.getTarget(); // 原始对象（不是代理）
+			Object[] args = joinPoint.getArgs();
+
+			method.setAccessible(true);
+			Object result = method.invoke(target, args);
+
 
 			// 执行成功后不马上删除Key，让其自然过期 （如果配置）
 			if (idempotent.delKey()) {
@@ -116,7 +119,9 @@ public class IdempotentAspect {
 				log.debug("业务完成删除幂等键, key: {}", redisKey);
 			}
 			return result;
-		} catch (Throwable e) {
+		} catch (InvocationTargetException e) {
+			log.error("目标方法异常: ", e.getTargetException());
+			e.getTargetException().printStackTrace();
 			// 异常时立即删除Key（如果配置）
 			if (cachedAnno.delKey()) {
 				redisTemplate.delete(redisKey);
@@ -129,115 +134,115 @@ public class IdempotentAspect {
 	}
 
 	private String buildKey(ProceedingJoinPoint joinPoint, IdempotentMethodMeta meta){
-        String rawKeyContent;
+		String rawKeyContent;
 		//从缓存中拿，避免反射
-        Method method = meta.getMethod();
+		Method method = meta.getMethod();
 		Idempotent idempotent = meta.getIdempotent();
-        HttpServletRequest currentRequest = RequestUtils.getCurrentRequest();
-        // 1. 使用自定义SPEL表达式
-        if (StringUtils.hasText(idempotent.key())) {
-            rawKeyContent = parseSpel(method, joinPoint.getArgs(), idempotent.key());
-        }
-        // 2. 自动生成默认Key：类名+方法名+参数哈希
-        else {
+		HttpServletRequest currentRequest = RequestUtils.getCurrentRequest();
+		// 1. 使用自定义SPEL表达式
+		if (StringUtils.hasText(idempotent.key())) {
+			rawKeyContent = parseSpel(method, joinPoint.getArgs(), idempotent.key());
+		}
+		// 2. 自动生成默认Key：类名+方法名+参数哈希
+		else {
 			//同样的，从缓存里拿
-            String className = meta.getClassName();
-            String methodName = meta.getMethodName();
+			String className = meta.getClassName();
+			String methodName = meta.getMethodName();
 			System.out.println();
 			int paramsHash = Arrays.toString(joinPoint.getArgs()).hashCode();
 			rawKeyContent = String.format("%s.%s:%d", className, methodName, paramsHash);
-        }
+		}
 
-        // 获取请求体数据
-        Map<String, Object> requestBody = RequestUtils.getRequestBody(currentRequest);
+		// 获取请求体数据
+		Map<String, Object> requestBody = RequestUtils.getRequestBody(currentRequest);
 
-        // 标准化处理请求体并追加
-        if (!requestBody.isEmpty()) {
-            String normalizedRequestBody = normalizeRequestBody(requestBody);
-            rawKeyContent += normalizedRequestBody;
-        }
+		// 标准化处理请求体并追加
+		if (!requestBody.isEmpty()) {
+			String normalizedRequestBody = normalizeRequestBody(requestBody);
+			rawKeyContent += normalizedRequestBody;
+		}
 
 
-        // 获取 当前请求 IP
-        String ipAddress = RequestUtils.getIpAddress(currentRequest);
+		// 获取 当前请求 IP
+		String ipAddress = RequestUtils.getIpAddress(currentRequest);
 		//新增：端口
 		String port = String.valueOf(currentRequest.getRemotePort());
 
 
 
-        String defTokenHeader = idempotent.tokenHeader();
-        if (!StringUtils.hasText(defTokenHeader) || defTokenHeader.isEmpty()) {
-            defTokenHeader = idempotentProperties.getTokenHeader();
-        }
+		String defTokenHeader = idempotent.tokenHeader();
+		if (!StringUtils.hasText(defTokenHeader) || defTokenHeader.isEmpty()) {
+			defTokenHeader = idempotentProperties.getTokenHeader();
+		}
 
-        String tokenValue = RequestUtils.getHeaderWithVariants(currentRequest, defTokenHeader);
+		String tokenValue = RequestUtils.getHeaderWithVariants(currentRequest, defTokenHeader);
 
 
-        // 生成32字节SHA-256哈希值
+		// 生成32字节SHA-256哈希值
 		return KEY_PREFIX + tokenValue + ":" + ipAddress + ":" + port + ":" + generateSha256(rawKeyContent);
 	}
 
-    /**
-     * 标准化请求体:
-     * 1. 过滤空值项
-     * 2. 按键名不区分大小写排序
-     * 3. 使用标准JSON格式序列化
-     */
-    private String normalizeRequestBody(Map<String, Object> requestBody) {
-        // 创建有序Map（按字段名排序）
-        Map<String, Object> sortedMap = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
+	/**
+	 * 标准化请求体:
+	 * 1. 过滤空值项
+	 * 2. 按键名不区分大小写排序
+	 * 3. 使用标准JSON格式序列化
+	 */
+	private String normalizeRequestBody(Map<String, Object> requestBody) {
+		// 创建有序Map（按字段名排序）
+		Map<String, Object> sortedMap = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
 
-        // 过滤空值项并收集到有序Map中
-        requestBody.entrySet().stream()
-                .filter(entry -> entry.getValue() != null)
-                .forEach(entry -> sortedMap.put(entry.getKey(), entry.getValue()));
+		// 过滤空值项并收集到有序Map中
+		requestBody.entrySet().stream()
+				.filter(entry -> entry.getValue() != null)
+				.forEach(entry -> sortedMap.put(entry.getKey(), entry.getValue()));
 
-        // 使用JSON序列化（假设项目中有JSON处理能力）
-        try {
-            return new ObjectMapper().writeValueAsString(sortedMap);
-        } catch (JsonProcessingException e) {
-            log.warn("请求体序列化失败，将使用原始toString: {}", e.getMessage());
-            return sortedMap.toString();
-        }
-    }
+		// 使用JSON序列化（假设项目中有JSON处理能力）
+		try {
+			return new ObjectMapper().writeValueAsString(sortedMap);
+		} catch (JsonProcessingException e) {
+			log.warn("请求体序列化失败，将使用原始toString: {}", e.getMessage());
+			return sortedMap.toString();
+		}
+	}
 
-    /**
-     * 生成32字节SHA-256哈希值（64字符十六进制字符串）
-     */
-    private String generateSha256(String input) {
-        try {
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            byte[] hashBytes = digest.digest(input.getBytes(StandardCharsets.UTF_8));
-            return bytesToHex(hashBytes);
-        } catch (NoSuchAlgorithmException e) {
-            // SHA-256是标准算法，理论上不会发生
-            throw new RuntimeException("SHA-256 algorithm not available", e);
-        }
-    }
+	/**
+	 * 生成32字节SHA-256哈希值（64字符十六进制字符串）
+	 */
+	private String generateSha256(String input) {
+		try {
+			MessageDigest digest = MessageDigest.getInstance("SHA-256");
+			byte[] hashBytes = digest.digest(input.getBytes(StandardCharsets.UTF_8));
+			return bytesToHex(hashBytes);
+		} catch (NoSuchAlgorithmException e) {
+			// SHA-256是标准算法，理论上不会发生
+			throw new RuntimeException("SHA-256 algorithm not available", e);
+		}
+	}
 
-    /**
-     * 字节数组转十六进制字符串
-     */
-    private String bytesToHex(byte[] bytes) {
-        StringBuilder hexString = new StringBuilder();
-        for (byte b : bytes) {
-            String hex = Integer.toHexString(0xff & b);
-            if (hex.length() == 1) hexString.append('0');
-            hexString.append(hex);
-        }
-        return hexString.toString();
-    }
+	/**
+	 * 字节数组转十六进制字符串
+	 */
+	private String bytesToHex(byte[] bytes) {
+		StringBuilder hexString = new StringBuilder();
+		for (byte b : bytes) {
+			String hex = Integer.toHexString(0xff & b);
+			if (hex.length() == 1) hexString.append('0');
+			hexString.append(hex);
+		}
+		return hexString.toString();
+	}
 
-    /**
-     * 解析SPEL表达式
-     */
-    private String parseSpel(Method method, Object[] args, String spel) {
-        Expression expression = parser.parseExpression(spel);
-        MethodBasedEvaluationContext context = new MethodBasedEvaluationContext(
-                null, method, args, nameDiscoverer
-        );
-        return expression.getValue(context, String.class);
-    }
+	/**
+	 * 解析SPEL表达式
+	 */
+	private String parseSpel(Method method, Object[] args, String spel) {
+		Expression expression = parser.parseExpression(spel);
+		MethodBasedEvaluationContext context = new MethodBasedEvaluationContext(
+				null, method, args, nameDiscoverer
+		);
+		return expression.getValue(context, String.class);
+	}
 	/**
 	 * 签名验证的核心逻辑，由 idempotentHandler 调用。
 	 *
