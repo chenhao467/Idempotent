@@ -30,7 +30,7 @@ public class RsaUtil {
 		}
 	}
 
-	public static String buildSignContent(Map<String, String> params) {
+	public static String buildSignContent(Map<String, Object> params) {
 		return params.entrySet()
 				.stream()
 				.filter(entry -> entry.getValue() != null && !"".equals(entry.getValue()))

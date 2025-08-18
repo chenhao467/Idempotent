@@ -40,6 +40,9 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.security.PublicKey;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -120,8 +123,8 @@ public class IdempotentAspect {
 			}
 			return result;
 		} catch (InvocationTargetException e) {
-			log.error("目标方法异常: ", e.getTargetException());
-			e.getTargetException().printStackTrace();
+//			log.error("目标方法异常: ", e.getTargetException());
+//			e.getTargetException().printStackTrace();
 			// 异常时立即删除Key（如果配置）
 			if (cachedAnno.delKey()) {
 				redisTemplate.delete(redisKey);
@@ -129,7 +132,9 @@ public class IdempotentAspect {
 				redisDelayedDeleteService.addDelayDeleteTask(redisKey, cachedAnno.delayCheckSeconds());
 				log.debug("业务异常删除幂等键, key: {}", redisKey);
 			}
-			throw new IdempotentException(e);
+//			throw new IdempotentException(e);
+			throw e.getTargetException();
+
 		}
 	}
 
@@ -249,14 +254,26 @@ public class IdempotentAspect {
 	 */
 	private void verifySign() throws Exception {
 		HttpServletRequest request = ((ServletRequestAttributes) RequestContextHolder.getRequestAttributes()).getRequest();
-		Map<String, String> paramsToSign = getAllParams(request);
+		Map<String, Object> paramsToSign = getAllParams(request);
 
-		String clientSign = paramsToSign.remove("sign");
+		String clientSign = (String) paramsToSign.remove("sign");
 		if (clientSign == null) {
 			throw new IdempotentException("签名校验失败：缺少'sign'参数");
 		}
 
 		// 1. 构造待签名字符串（如 key1=value1&key2=value2...）
+		// 直接在原 Map 上处理日期字段
+		paramsToSign.forEach((key, value) -> {
+			if (value == null) {
+				paramsToSign.remove(key); // 空值跳过
+			} else if (value instanceof LocalDate) {
+				paramsToSign.put(key, ((LocalDate) value).format(DateTimeFormatter.ofPattern("yyyy-MM-dd")));
+			} else if (value instanceof LocalDateTime) {
+				paramsToSign.put(key, ((LocalDateTime) value).format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")));
+			} else {
+				paramsToSign.put(key, value.toString()); // 其他类型转字符串
+			}
+		});
 		String dataToVerify = RsaUtil.buildSignContent(paramsToSign);
 
 		// 2. 验签
@@ -271,8 +288,8 @@ public class IdempotentAspect {
 		log.info("API签名验证通过。");
 	}
 
-	private Map<String, String> getAllParams(HttpServletRequest request) {
-		Map<String, String> params = new HashMap<>();
+	private Map<String, Object> getAllParams(HttpServletRequest request) {
+		Map<String, Object> params = new HashMap<>();
 		// 1. 先取表单参数
 		request.getParameterMap().forEach((k, v) -> params.put(k, v[0]));
 
@@ -280,7 +297,7 @@ public class IdempotentAspect {
 		if (request.getContentType() != null && request.getContentType().contains("application/json")) {
 			try {
 				String body = getRequestBody(request);
-				if (body != null && !body.isEmpty()) {
+				if (!body.isEmpty()) {
 					ObjectMapper mapper = new ObjectMapper();
 					Map<String, Object> jsonMap = mapper.readValue(body, Map.class);
 					jsonMap.forEach((k, v) -> params.put(k, v == null ? "" : v.toString()));
