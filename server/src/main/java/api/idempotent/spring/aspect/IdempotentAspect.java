@@ -107,12 +107,8 @@ public class IdempotentAspect {
 			throw new IdempotentException(cachedAnno.info());
 		}
 		try {
-			Method method = meta.getMethod();
-			Object target = joinPoint.getTarget(); // 原始对象（不是代理）
-			Object[] args = joinPoint.getArgs();
 
-			method.setAccessible(true);
-			Object result = method.invoke(target, args);
+			Object result = joinPoint.proceed();
 
 
 			// 执行成功后不马上删除Key，让其自然过期 （如果配置）
